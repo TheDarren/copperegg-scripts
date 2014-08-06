@@ -1,0 +1,106 @@
+#!/usr/bin/perl -w
+# Author: Darren Patterson <darren.patterson@stanford.edu
+# Copyright: 2014 The Board of Trustees of the Leland Stanford Junior University
+#
+# License:: Permission is hereby granted, free of charge, to any person
+# obtaining a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including without
+# limitation the rights to use, copy, modify, merge, publish, distribute,
+# sublicense, and/or sell copies of the Software, and to permit persons to whom
+# the Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+
+use strict;
+use JSON;
+use LWP;
+use Data::Dumper;
+use Getopt::Long qw(GetOptions);
+
+my $api = '';
+
+my $USAGE = <<'EOU';
+Usage:
+  ./ce-set-contact-profile -n profileName -s SMSemail [-e email] [-h|--help] [-v|--verbose] [-q|--quiet]
+
+  NOTES:
+  SMSemail must be an email address.
+
+  profileName must match an existing profile name in CopperEgg.
+
+EOU
+# options
+my $verb;
+my $help;
+my $name;
+my $number;
+my $quiet;
+my $email = '';
+
+GetOptions ( 'v|verbose' => \$verb,
+             'h|help'    => \$help,
+             'name|n=s'  => \$name,
+             'sms|s=s'   => \$number,
+             'email|e=s' => \$email,
+             'quiet|q'   => \$quiet,
+           );
+
+if ($help) {
+  print $USAGE;
+  exit;
+}
+
+if (!defined($name) || !defined($number)) {
+  print STDERR $USAGE;
+  exit 2;
+}
+chomp $name;
+chomp $number;
+if (defined($email)) {
+  chomp $email;
+}
+else {
+  $email = '';
+}
+
+
+my $browser = LWP::UserAgent->new;
+
+my $response = $browser->get('https://'.$api.':U@api.copperegg.com:443/v2/alerts/profiles.json' );
+
+die "Error: ".$response->status_line."\n" unless $response->is_success;
+
+my $results = decode_json($response->content);
+
+#print Dumper @$results[1];
+foreach my $s (@$results) {
+  if ( $$s{'name'} eq $name ) {
+    print "ID: ".$$s{'id'}."\n" if $verb;
+    my $json = '{"name":"'.$name.'", "state":"enabled","destinations":[{"type":"Email","label":"Email","options":{"email": "'.$number.'"}}';
+    # Set email (possibly empty).
+    $json .= ',{"type":"Email","label":"Email","options":{"email":"'.$email.'"}}]}' ;
+
+    my $req = HTTP::Request->new( 'PUT', 'https://'.$api.':U@api.copperegg.com/v2/alerts/profiles/'.$$s{'id'}.'.json' );
+    $req->header( 'Content-Type' => 'application/json' );
+    $req->content( $json );
+    $response = $browser->request( $req );
+    
+    if ($response->is_success) {
+      print "Success: set $name, SMS to $number, and secondary email to \'$email\'\n" unless $quiet;
+      print Dumper $response->content if $verb;
+    }
+    else {
+      die "Error: ".$response->status_line."\n";
+    }
+  }
+}

@@ -1,0 +1,12 @@
+#!/bin/bash
+sentinel='/var/tmp/check_disk'
+warn='10%'
+crit='5%'
+# Get warn and crit vars
+. /etc/check_disk.conf
+
+if [ `/usr/lib/nagios/plugins/check_disk -w ${warn} -c ${crit} -x /afs -x /var/cache/openafs -x /dev -x /u01 -x /u02 -x /u03 -x /u04 -x /u05 -x /u06 -x /u07 -x /u08 -x /u09 -x /usr/vice/cache 2>&1 > /dev/null; echo $?` != '0' ]; then
+    rm "${sentinel}"
+else
+    touch "${sentinel}"
+fi

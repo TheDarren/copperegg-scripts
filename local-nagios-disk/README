@@ -1,0 +1,11 @@
+The scripts in this directory are used with CopperEgg pro mode to work-around
+not being able to exclude certain filesystems or set specific alert thresholds
+for certain filesystems.
+
+The way this works on Linux is:
+- puppet creates /etc/check_disk.conf for overrides.
+- puppet installs nagios plugins (for /usr/lib/nagios/plugins/check_disk)
+- puppet installs scripts in /usr/local/bin/ and a cron job every 5min.
+- Configure each host in CopperEgg so it is using pro mode.
+- Configure CopperEgg to alert if the process list does not contain "runWhileFile /var/tmp/check_disk".
+
