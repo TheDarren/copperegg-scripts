@@ -1,5 +1,12 @@
 #!/bin/bash
-
-while [ -e "${1}" ]; do
-  sleep 1m
+count=0;
+for i in `pgrep -f "runWhileFile ${1}"`; do
+    count=$(( $count + 1 ));
 done
+if [ "$count" == "1" ] ; then
+    while [ -e "${1}" ]; do
+        sleep 1m
+    done
+else
+    exit 0
+fi
