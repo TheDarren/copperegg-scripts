@@ -1,0 +1,141 @@
+#!/usr/bin/perl -w
+# Author: Darren Patterson <darren.patterson@stanford.edu
+# Copyright: 2014 The Board of Trustees of the Leland Stanford Junior University
+#
+# License:: Permission is hereby granted, free of charge, to any person
+# obtaining a copy of this software and associated documentation files (the
+# "Software"), to deal in the Software without restriction, including without
+# limitation the rights to use, copy, modify, merge, publish, distribute,
+# sublicense, and/or sell copies of the Software, and to permit persons to whom
+# the Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+
+use strict;
+use Data::Dumper;
+use Date::Manip;
+use Getopt::Long qw(GetOptions);
+
+# Location of gcalcli.
+my $GPATH='~/gcalcli-master';
+# Make change if next scheduled apt occurred between now and $MIN ago.  It
+# isn't a huge deal if we run this twice, so I set it to 6min default & the
+# cron will run every 5min.
+my $MIN='6';
+
+my $contacts = '/etc/contacts';
+
+my $USAGE = <<'EOU';
+Usage:
+  ./get-oncall-from-cal -c "CALENDAR NAME" -p "PROFILE NAME" [-h|--help] [-v|--verbose]
+
+  NOTES:
+    Use double quotes around calendar name and profile name.  The calendar name
+    matches on the start of the name - be careful with this! It is gcalcli
+    functionality.  Profile name must match the name of a CopperEgg profile.
+
+EOU
+
+my $cal;
+my $debug;
+my $help;
+my $profile;
+
+GetOptions ( 'v|verbose'  => \$debug,
+             'h|help'     => \$help,
+             'c|calendar=s' => \$cal,
+             'p|profile=s'  => \$profile,
+           );
+
+if ($help) {
+    print $USAGE;
+    exit;
+}
+
+if (! defined ($cal) || ! defined ($profile) ) {
+    print "You must provide a calendar name AND a profile name.\n";
+    print $USAGE;
+    exit 2;
+}
+
+print "Calendar: ${cal} :::: Profile: ${profile}\n" if $debug;
+
+my @items = `cd ${GPATH}; PYTHONPATH=. ./gcalcli --calendar "${cal}" --nocolor --nocache --details location agenda`;
+
+my @fields;
+my $date;
+my $day;
+my $time;
+my $user;
+my $now = ParseDate("now");
+my $ago = ParseDate("${MIN} minutes ago");
+foreach my $l (@items) {
+    next if ($l =~ /^$/);
+    @fields = split(/\s{2,}/, $l);
+    if ($fields[0] !~ /^$/) {
+        if ($fields[0] =~ m/No Events Found/) {
+            next;
+        }
+        $day = $fields[0];
+        print "Found and setting day\n" if $debug;
+    }
+    next if ($fields[1] =~ m/Location/);
+
+    $time = $fields[1] if (defined$fields[1]);
+
+    print "Date: $day $time\n" if $debug;
+    $date = ParseDate($day.' '.$time);
+    if (! defined ($date)) {
+        print "Could not parse date: $!\n" if $debug;
+        next;
+    }
+
+    if (Date_Cmp($date,$now) <= 0 && Date_Cmp($date,$ago) >= 0) {
+        print "Cal was from the last ${MIN} min. Setting user.\n" if $debug;
+        chomp $fields[2];
+        if ($fields[2] =~ m/^\w+$/) {
+            $user = $fields[2];
+        } 
+        else {
+            print "User \"${fields[2]}\" invalid.\n";
+        }
+    }
+}
+
+if (! defined ($user)) {
+    print "Nothing to be done - exit cleanly.\n" if $debug;
+    exit; 
+} 
+
+print "Will set contact profile \"${profile}\" to \"${user}\"\n" if $debug;
+
+# read config file for $user
+open (F, "<${contacts}/${user}") || die "Could not open user file in ${contacts}: $!";
+my $c = <F>;
+close (F);
+chomp ($c);
+
+# call /usr/local/bin/ce-set-contact-profile -n profileName -s SMSemail -e crcservergroup@lists.stanford.edu
+# If people want more than one email notified, use commas.
+my @results = `sudo /usr/local/bin/ce-set-contact-profile -n "${profile}" -s "${c}" -e crcservergroup\@lists.stanford.edu`;
+print @results if $debug;
+
+if ($results[0] !~ m/^Success/) {
+    print "Profile set failed!\n";
+    print @results;
+    exit 2;
+}
+
+# Cheap hack to send email from system call instead of using a module.
+`echo "You have been placed on-call for the contact profile: ${profile}" | mail -aFrom:nobody\@stanford.edu -s 'ON-CALL' "${c}"`
+
